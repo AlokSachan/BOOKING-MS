@@ -1,8 +1,10 @@
 package com.wipro.service;
 
+import com.wipro.dto.ErrorResponse;
 import com.wipro.dto.PaymentDto;
 import com.wipro.dto.PropertyDto;
 import com.wipro.entity.BookingEntity;
+import com.wipro.exception.BookingFailedException;
 import com.wipro.repository.BookingRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +14,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class BookingServiceImpl implements BookingService {
@@ -29,33 +32,37 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public BookingEntity newBooking(BookingEntity bookingEntity) {
+
         BookingEntity savedBooking = null;
         PropertyDto.builder().availableRooms(bookingEntity.getNumRooms()).build();
-        ResponseEntity<PropertyDto> forEntity = restTemplate.getForEntity("http://localhost:9109/property/{id}", PropertyDto.class, bookingEntity.getPropertyId());
-        if (forEntity.getStatusCode().is2xxSuccessful()) {
-            Integer availableRooms = forEntity.getBody().getAvailableRooms();
-            if (availableRooms >= bookingEntity.getNumRooms()) {
-                PropertyDto body = forEntity.getBody();
-                body.setLockForBook(true);
-                HttpEntity<PropertyDto> propertyRequestEntity = new HttpEntity<PropertyDto>(body);
-                HttpEntity<PropertyDto> propertyResponse = restTemplate.exchange("http://localhost:9109/property", HttpMethod.PUT, propertyRequestEntity, PropertyDto.class);
-                bookingEntity.setBookingStatus("INITIATED");
+        ResponseEntity<PropertyDto> getPropertyResponse = restTemplate.getForEntity("http://localhost:9109/property/{id}", PropertyDto.class, bookingEntity.getPropertyId());
+        if (getPropertyResponse.getStatusCode().is2xxSuccessful()) {
+            Integer availableRooms = Objects.requireNonNull(getPropertyResponse.getBody()).getAvailableRooms();
+            HttpEntity<PropertyDto> propertyRequestEntity = validateIfRoomsAvailable(bookingEntity, availableRooms, getPropertyResponse);
+            HttpEntity<PropertyDto> propertyResponse = restTemplate.exchange("http://localhost:9109/property", HttpMethod.PUT, propertyRequestEntity, PropertyDto.class);
+            bookingEntity.setBookingStatus("INITIATED");
+            savedBooking = bookingRepository.save(bookingEntity);
+            ResponseEntity<PaymentDto> paymentDtoResponseEntity = executePayment(savedBooking);
+            if (paymentDtoResponseEntity.getStatusCode().is2xxSuccessful()) {
+                PropertyDto updateProperty = propertyResponse.getBody();
+                updateProperty.setLockForBook(false);
+                int remainingRooms = availableRooms - bookingEntity.getNumRooms();
+                updateProperty.setAvailableRooms(remainingRooms);
+                HttpEntity<PropertyDto> updatePropertyEntity = new HttpEntity<>(updateProperty);
+                HttpEntity<PropertyDto> response = restTemplate.exchange("http://localhost:9109/property", HttpMethod.PUT, updatePropertyEntity, PropertyDto.class);
+                bookingEntity.setBookingStatus("BOOKED");
                 savedBooking = bookingRepository.save(bookingEntity);
-                ResponseEntity<PaymentDto> paymentDtoResponseEntity = executePayment(savedBooking);
-                if (paymentDtoResponseEntity.getStatusCode().is2xxSuccessful()) {
-                    PropertyDto updateProperty = propertyResponse.getBody();
-                    updateProperty.setLockForBook(false);
-                    int remainingRooms = availableRooms - bookingEntity.getNumRooms();
-                    updateProperty.setAvailableRooms(remainingRooms);
-                    HttpEntity<PropertyDto> updatePropertyEntity = new HttpEntity<>(updateProperty);
-                    HttpEntity<PropertyDto> response = restTemplate.exchange("http://localhost:9109/property", HttpMethod.PUT, updatePropertyEntity, PropertyDto.class);
-                    bookingEntity.setBookingStatus("BOOKED");
-                    savedBooking = bookingRepository.save(bookingEntity);
-                }
+            } else {
+                bookingEntity.setBookingStatus("FAILED");
+                bookingEntity.setBookingDescription("booking failed due to payment failure..! please retry.");
+                savedBooking = bookingRepository.save(bookingEntity);
             }
+        } else {
+            bookingEntity.setBookingStatus("FAILED");
+            bookingEntity.setBookingDescription("booking failed due to unavailability of the property service..! please retry.");
+            savedBooking = bookingRepository.save(bookingEntity);
         }
         return savedBooking;
-
     }
 
     @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "paymentServiceDown")
@@ -68,7 +75,7 @@ public class BookingServiceImpl implements BookingService {
 
     public ResponseEntity<PaymentDto> paymentServiceDown() {
         PaymentDto paymentDto = new PaymentDto();
-        return new ResponseEntity<>(paymentDto, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(paymentDto, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     @Override
@@ -85,5 +92,17 @@ public class BookingServiceImpl implements BookingService {
     public void deleteBooking(Integer id) {
         BookingEntity bookingDetails = getBookingDetails(id);
         bookingRepository.delete(bookingDetails);
+    }
+
+    private HttpEntity<PropertyDto> validateIfRoomsAvailable(BookingEntity bookingEntity, Integer availableRooms, ResponseEntity<PropertyDto> forEntity) {
+        if (availableRooms < bookingEntity.getNumRooms()) {
+            ErrorResponse errorResponse = new ErrorResponse();
+            errorResponse.setErrorMessage("Booking cant be done, due to unavailability of the rooms");
+            throw new BookingFailedException(HttpStatus.NOT_FOUND, errorResponse);
+        }
+        PropertyDto body = forEntity.getBody();
+        body.setLockForBook(true);
+        HttpEntity<PropertyDto> propertyRequestEntity = new HttpEntity<PropertyDto>(body);
+        return propertyRequestEntity;
     }
 }
