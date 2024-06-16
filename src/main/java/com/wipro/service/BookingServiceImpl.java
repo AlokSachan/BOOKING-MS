@@ -6,8 +6,9 @@ import com.wipro.dto.PropertyDto;
 import com.wipro.entity.BookingEntity;
 import com.wipro.exception.BookingFailedException;
 import com.wipro.repository.BookingRepository;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cloud.client.circuitbreaker.CircuitBreaker;
+import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -18,6 +19,9 @@ import java.util.Objects;
 
 @Service
 public class BookingServiceImpl implements BookingService {
+
+    @Autowired
+    private CircuitBreakerFactory circuitBreakerFactory;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -65,12 +69,13 @@ public class BookingServiceImpl implements BookingService {
         return savedBooking;
     }
 
-    @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "paymentServiceDown")
+   // @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "paymentServiceDown")
     public ResponseEntity<PaymentDto> executePayment(BookingEntity savedBooking) {
         PaymentDto paymentDto = PaymentDto.builder().amount("100").bookingId(savedBooking.getId().toString()).build();
         HttpEntity<PaymentDto> paymentEntity = new HttpEntity<>(paymentDto);
-        ResponseEntity<PaymentDto> paymentDtoResponseEntity = restTemplate.exchange("http://localhost:9111/pay", HttpMethod.POST, paymentEntity, PaymentDto.class);
-        return paymentDtoResponseEntity;
+        CircuitBreaker paymentCircuitBreaker = circuitBreakerFactory.create("paymentCircuitBreaker");
+        return paymentCircuitBreaker.run(() -> restTemplate.exchange("http://localhost:9111/pay", HttpMethod.POST, paymentEntity, PaymentDto.class),
+                throwable -> paymentServiceDown());
     }
 
     public ResponseEntity<PaymentDto> paymentServiceDown() {
