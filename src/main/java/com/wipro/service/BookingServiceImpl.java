@@ -4,11 +4,9 @@ import com.wipro.dto.PaymentDto;
 import com.wipro.dto.PropertyDto;
 import com.wipro.entity.BookingEntity;
 import com.wipro.repository.BookingRepository;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -44,7 +42,7 @@ public class BookingServiceImpl implements BookingService {
                 bookingEntity.setBookingStatus("INITIATED");
                 savedBooking = bookingRepository.save(bookingEntity);
                 ResponseEntity<PaymentDto> paymentDtoResponseEntity = executePayment(savedBooking);
-                if(paymentDtoResponseEntity.getStatusCode().is2xxSuccessful()){
+                if (paymentDtoResponseEntity.getStatusCode().is2xxSuccessful()) {
                     PropertyDto updateProperty = propertyResponse.getBody();
                     updateProperty.setLockForBook(false);
                     int remainingRooms = availableRooms - bookingEntity.getNumRooms();
@@ -59,12 +57,18 @@ public class BookingServiceImpl implements BookingService {
         return savedBooking;
 
     }
-    @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "showServiceDown")
+
+    @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "paymentServiceDown")
     public ResponseEntity<PaymentDto> executePayment(BookingEntity savedBooking) {
         PaymentDto paymentDto = PaymentDto.builder().amount("100").bookingId(savedBooking.getId().toString()).build();
         HttpEntity<PaymentDto> paymentEntity = new HttpEntity<>(paymentDto);
-        ResponseEntity<PaymentDto> paymentDtoResponseEntity = restTemplate.exchange("http://localhost:9111/pay", HttpMethod.POST, paymentEntity,PaymentDto.class);
+        ResponseEntity<PaymentDto> paymentDtoResponseEntity = restTemplate.exchange("http://localhost:9111/pay", HttpMethod.POST, paymentEntity, PaymentDto.class);
         return paymentDtoResponseEntity;
+    }
+
+    public ResponseEntity<PaymentDto> paymentServiceDown() {
+        PaymentDto paymentDto = new PaymentDto();
+        return new ResponseEntity<>(paymentDto, HttpStatus.BAD_REQUEST);
     }
 
     @Override

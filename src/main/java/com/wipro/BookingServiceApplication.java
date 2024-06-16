@@ -8,7 +8,7 @@ import org.springframework.cloud.context.config.annotation.RefreshScope;
 
 @SpringBootApplication
 @EnableDiscoveryClient
-//@RefreshScope
+@RefreshScope
 public class BookingServiceApplication {
 
 	public static void main(String[] args) {
