@@ -2,16 +2,13 @@ package com.wipro.controller;
 
 import com.wipro.entity.BookingEntity;
 import com.wipro.service.BookingService;
-import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 
@@ -19,7 +16,7 @@ import java.util.List;
 @RequestMapping("/book")
 
 public class BookingController {
-    Logger logger= LoggerFactory.getLogger(BookingController.class);
+    Logger logger = LoggerFactory.getLogger(BookingController.class);
     @Autowired
     private BookingService bookingService;
 
@@ -42,5 +39,11 @@ public class BookingController {
     @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<BookingEntity> updateBooking(@RequestBody BookingEntity bookingEntity) {
         return new ResponseEntity<>(bookingService.updateBooking(bookingEntity), HttpStatus.CREATED);
+    }
+
+    @DeleteMapping(value = "/{id}")
+    public ResponseEntity<Void> deleteBooking(@PathVariable Integer id) {
+        bookingService.deleteBooking(id);
+        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
     }
 }

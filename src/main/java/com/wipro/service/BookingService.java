@@ -13,4 +13,6 @@ public interface BookingService {
     BookingEntity getBookingDetails(Integer id);
 
     BookingEntity updateBooking(BookingEntity bookingEntity);
+
+    void deleteBooking(Integer id);
 }

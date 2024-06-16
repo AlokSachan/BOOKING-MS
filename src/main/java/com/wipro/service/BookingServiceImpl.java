@@ -80,4 +80,10 @@ public class BookingServiceImpl implements BookingService {
     public BookingEntity updateBooking(BookingEntity bookingEntity) {
         return bookingRepository.save(bookingEntity);
     }
+
+    @Override
+    public void deleteBooking(Integer id) {
+        BookingEntity bookingDetails = getBookingDetails(id);
+        bookingRepository.delete(bookingDetails);
+    }
 }
